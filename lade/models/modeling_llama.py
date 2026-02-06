@@ -73,6 +73,7 @@ if is_torch_fx_available():
 
 
 logger = logging.get_logger(__name__)
+logger.setLevel(logging.DEBUG)
 
 _CONFIG_FOR_DOC = "LlamaConfig"
 
@@ -802,7 +803,7 @@ class LlamaSdpaAttention(LlamaAttention):
 
 
 LLAMA_ATTENTION_CLASSES = {
-    "eager": LlamaAttention,
+    "eager": LlamaAttention,  ## default is eager
     "flash_attention_2": LlamaFlashAttention2,
     "sdpa": LlamaSdpaAttention,
 }
@@ -859,6 +860,7 @@ class LlamaDecoderLayer(nn.Module):
         # Self Attention
         #attn = self.self_attn 
         if not use_flash and not self._flash_attn_2_enabled:
+            # print(f"[LlamaDecoderLayer] not using flash attention")
             hidden_states, self_attn_weights, present_key_value = self.self_attn.forward(
                 hidden_states=hidden_states,
                 attention_mask=attention_mask,
@@ -869,6 +871,7 @@ class LlamaDecoderLayer(nn.Module):
                 lookahead=None,
             )
         else:
+            print(f"[LlamaDecoderLayer] using flash attention")
             hidden_states, self_attn_weights, present_key_value = self.self_attn.forward_flash(
                 hidden_states=hidden_states,
                 attention_mask=attention_mask,
@@ -1010,7 +1013,6 @@ LLAMA_INPUTS_DOCSTRING = r"""
             Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
 """
 
-
 @add_start_docstrings(
     "The bare LLaMA Model outputting raw hidden-states without any specific head on top.",
     LLAMA_START_DOCSTRING,
@@ -1027,6 +1029,7 @@ class LlamaModel(LlamaPreTrainedModel):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
+        print(f"[LlamaModel] config._attn_implementation: {config._attn_implementation}")
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
@@ -1039,6 +1042,7 @@ class LlamaModel(LlamaPreTrainedModel):
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
         self.post_init()
+        self.counter = 0
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -1181,10 +1185,13 @@ class LlamaModel(LlamaPreTrainedModel):
                 attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length, (WINDOWS_SIZE, is_prefill, guess, guess_size, not_seq, continue_all, la_mask_offset, level_sizes), 
             )
 
+        print(f"[LlamaModel][LlamaModeljforward][after j_prepare_decoder_attention_mask] attention_mask: {attention_mask.shape}, guess: {guess}, guess_size: {guess_size}, seq_length: {seq_length}, past_key_values_length: {past_key_values_length}")
+
         level_offset = seq_length - (sum(level_sizes) + 1) - (len(guess) if guess is not None else 0) #offset when you guess multiple tokens and not copy kv-cache 
         dist_offset = (1 + level_sizes[0] - level_sizes[-1]) #offset for distributed inference 
 
         lookahead = [level_sizes[-1], len(level_sizes) + 1, len(guess) // guess_size if guess is not None else 0,0,level_offset+dist_offset,level_offset,0]
+        print(f"[LlamaModel][LlamaModeljforward][before infer] level_offset: {level_offset}, dist_offset: {dist_offset}, lookahead: {lookahead}")
 
         hidden_states = inputs_embeds
 
@@ -1199,8 +1206,10 @@ class LlamaModel(LlamaPreTrainedModel):
         all_hidden_states = () if output_hidden_states else None
         all_self_attns = () if output_attentions else None
         next_decoder_cache = () if use_cache else None
-
+        self.counter += 1
+        print(f"[LlamaModel][LlamaModeljforward][before infer] counter: {self.counter}, hidden_states: {hidden_states.shape}, attention_mask: {attention_mask.shape}, position_ids: {position_ids}.shape")
         for idx, decoder_layer in enumerate(self.layers):
+            # print(f"[LlamaModeljforward] counter: {self.counter}, layer_idx: {idx}")
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
@@ -1330,6 +1339,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        print(f"[LlamaForCausalLM] input_ids: {input_ids.shape}")
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs = self.model(
@@ -1352,6 +1362,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         else:
             logits = self.lm_head(hidden_states)
         logits = logits.float()
+        print(f"[LlamaForCausalLM] logits: {logits.shape}")
 
         loss = None
         if labels is not None:
@@ -1495,7 +1506,9 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
                 else:
                     offset = len(past_tokens[0]) + 1 - len(past_tokens[ll])
                     ids_list += list(range(lst_id + ll + offset, lst_id + ll + offset + len(past_tokens[ll])))
+            print(f"[LlamaForCausalLM][jforward_multilevel][fill_level={fill_level}] attn_size: {attn_size}, level_sizes: {level_sizes}, all_past: {all_past}, ids_list: {ids_list}")
 
+        print(f"[LlamaForCausalLM][jforward_multilevel][before concat input_ids] input_ids: {input_ids}, all_past: {all_past}, guess_tokens: {guess_tokens}")
         if guess_tokens is not None:
             input_ids = torch.cat((input_ids, torch.tensor(all_past + guess_tokens, device=input_ids.device, dtype=input_ids.dtype).unsqueeze(0)), dim=1)
             guess_ids = list(range(lst_id + 1, lst_id + 1 + guess_size)) * (len(guess_tokens) // guess_size)
@@ -1503,12 +1516,13 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
             position_ids = torch.cat((position_ids, torch.tensor(ids_list + guess_ids, device=input_ids.device, dtype=input_ids.dtype).unsqueeze(0)), dim=1)
             attention_mask = torch.cat((attention_mask, torch.ones(1, attn_size + len(guess_tokens), \
                     device=input_ids.device, dtype=input_ids.dtype)), dim=1)
-
+            print(f"[LlamaForCausalLM][jforward_multilevel][append all_past and guess to input_ids][fill_level={fill_level}] guess_tokens: {guess_tokens}, guess_ids: {guess_ids}, input_ids: {input_ids.shape}-{input_ids}, position_ids: {position_ids.shape}, attention_mask: {attention_mask.shape}")
         else:
             input_ids = torch.cat((input_ids, torch.tensor(all_past, device=input_ids.device, dtype=input_ids.dtype).unsqueeze(0)), dim=1)
             position_ids = torch.cat((position_ids, torch.tensor(ids_list, device=input_ids.device, dtype=input_ids.dtype).unsqueeze(0)), dim=1)
             attention_mask = torch.cat((attention_mask, torch.ones(1, attn_size, \
                     device=input_ids.device, dtype=input_ids.dtype)), dim=1)
+            print(f"[LlamaForCausalLM][jforward_multilevel][append all_past to input_ids][fill_level={fill_level}] input_ids: {input_ids.shape}-{input_ids}, position_ids: {position_ids.shape}, attention_mask: {attention_mask.shape}")
 
         step_len = attention_mask.size(1)
         
@@ -1539,9 +1553,9 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
             logits = torch.cat(logits, dim=-1)
         else:
             logits = self.lm_head(hidden_states)
-        
-        
+
         logits = logits.float()
+        print(f"[LlamaForCausalLM][jforward_multilevel][after LlamaModeljforward] hidden_states: {hidden_states.shape}, logits: {logits.shape}")
 
         loss = None
         if labels is not None: #train
@@ -1576,6 +1590,8 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
             lguess = 0
 
         ret.out_logits = ret.logits[:,prefill_size - 1,:].to(input_ids.device) #decode logits
+        print(f"[LlamaForCausalLM][jforward_multilevel][after LlamaModeljforward] prefill_size: {prefill_size}, past_size: {past_size}, kvcache_len: {ret.kvcache_len}, step_len: {ret.step_len}, lguess: {lguess}, guess_tokens: {guess_tokens}, out_logits: {ret.out_logits.shape}")
+
         assert fill_level != -1
         if lguess > 0:
             window = len(past_tokens[fill_level])
@@ -1590,6 +1606,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
             else:
                 ret.inp_logits = ret.logits[:,start:end,:].to(input_ids.device) #lookahead branch logits
             ret.guess_logits = ret.logits[:,-lguess:,:].to(input_ids.device) #verification branch logits
+            print(f"[LlamaForCausalLM][jforward_multilevel][after LlamaModeljforward] lguess: {lguess}, window: {window}, start: {start}, end: {end}, inp_logits: {ret.inp_logits.shape}, guess_logits: {ret.guess_logits.shape}")
         else:
             window = len(past_tokens[fill_level])
             start = ret.logits.size(1)-window
@@ -1604,6 +1621,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
                 ret.inp_logits = tmp[:,start - base:end - base,:].to(input_ids.device)
             else:
                 ret.inp_logits = ret.logits[:,start:end,:].to(input_ids.device) #lookahead branch logits
+            print(f"[LlamaForCausalLM][jforward_multilevel][after LlamaModeljforward][lguess=0], window: {window}, start: {start}, end: {end}, inp_logits: {ret.inp_logits.shape}")
         
         return ret
 

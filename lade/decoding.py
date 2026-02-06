@@ -15,6 +15,7 @@ COLOR_PRINT = int(os.environ.get("COLOR_PRINT", 0))
 def greedy_search_proxy(self, *args, **kwargs):
     USE_LADE = int(os.environ.get("USE_LADE", 0))
     CHAT = int(os.environ.get("CHAT", 0))
+    print(f"\n[greedy_search_proxy] USE_LADE: {USE_LADE}, CHAT: {CHAT}")
     if CHAT and USE_LADE:
         return jacobi_greedy_search_multilevel(self, chat=True, *args, **kwargs)
     elif CHAT:
@@ -35,6 +36,8 @@ def sample_proxy(self, *args, **kwargs):
 
 
 def update_token_map(token_map, lst_token, past_tokens, new_results, LEVEL, WINDOW_SIZE, GUESS_SET_SIZE):
+    print(f"[append_new_generated_pool][input] lst_token: {lst_token}, token_map: {len(token_map)}, past_tokens: {past_tokens}, new_results: {new_results}")
+
     if GUESS_SET_SIZE != -1: #limited guess set size for each key, lru policy  
         if lst_token not in token_map:
             token_map[lst_token] = []
@@ -76,12 +79,14 @@ def update_token_map(token_map, lst_token, past_tokens, new_results, LEVEL, WIND
                 token_map[past_tokens[0][i - 1]] = set()
             tup = tuple(past_tokens[ll][i] for ll in range(1, LEVEL - 1)) + (new_results[i],)
             token_map[past_tokens[0][i - 1]].add(tup) 
+    print(f"[append_new_generated_pool][output] token_map: {len(token_map)}")
 
 def append_new_generated_pool(tokens, token_map, LEVEL, GUESS_SET_SIZE):
     if len(tokens) != LEVEL:
         return 
     lst_token = tokens[0]
     tup = tuple(tokens[1:])
+    print(f"[append_new_generated_pool][input] all_old_tokens: {tokens}, token_map: {len(token_map)}, lst_token: {lst_token}")
 
     if GUESS_SET_SIZE != -1: #limited guess set size for each key, lru policy  
         if lst_token not in token_map:
@@ -99,9 +104,12 @@ def append_new_generated_pool(tokens, token_map, LEVEL, GUESS_SET_SIZE):
         if lst_token not in token_map:
             token_map[lst_token] = set()
         token_map[lst_token].add(tup) 
+    # append_new_generated_pool(all_old_tokens[-LEVEL:], token_map, LEVEL, GUESS_SET_SIZE)
+    print(f"[append_new_generated_pool][output] token_map: {len(token_map)}")
 
 
 def fill_pool_with_prompt(prompts, token_map, LEVEL, GUESS_SET_SIZE):
+    print(f"[fill_pool_with_prompt][input] prompts: {len(prompts)}, token_map: {len(token_map)}")
     for start_idx in range(len(prompts) - LEVEL + 1):
         lst_token = prompts[start_idx]
         tup = tuple(prompts[start_idx+1:start_idx+LEVEL])
@@ -125,7 +133,7 @@ def fill_pool_with_prompt(prompts, token_map, LEVEL, GUESS_SET_SIZE):
             if lst_token not in token_map:
                 token_map[lst_token] = set()
             token_map[lst_token].add(tup) 
-
+    print(f"[fill_pool_with_prompt][output] token_map: {len(token_map)}")
 
 
 def filter_window(level_window, eos_token_id, reset_func):
@@ -862,6 +870,7 @@ def jacobi_greedy_search_multilevel(
     POOL_FROM_PROMPT = CONFIG_MAP.get("POOL_FROM_PROMPT", 0)
     USE_AWQ = False #not support AWQ
     #IN FLASH ATTENTION WE REORDERED LOOKAHEAD WINDOW 
+    print(f"[jacobi_greedy_search_multilevel] input_ids: {input_ids.shape}, unfinished_sequences: {unfinished_sequences.shape}")
 
     GUESS_SIZE = LEVEL - 1
     NOT_SEQ = 0
@@ -872,6 +881,7 @@ def jacobi_greedy_search_multilevel(
     assert TEMP_FOR_GUESS == 0
     assert ALWAYS_FWD_ONE == 1
     assert USE_AWQ == False 
+    print(f"[jacobi_greedy_search_multilevel] WINDOW_SIZE: {WINDOW_SIZE}, GUESS_SET_SIZE: {GUESS_SET_SIZE}, LEVEL: {LEVEL}, GUESS_SIZE: {GUESS_SIZE}")
 
     ############### Init methods
     #random.seed(10) #unset this random seed later
@@ -879,7 +889,7 @@ def jacobi_greedy_search_multilevel(
     all_old_tokens = input_ids[0].tolist()
     init_len = len(all_old_tokens)
     order_copy_from_idx = [0]
-
+    print(f"[jacobi_greedy_search_multilevel] init_len: {init_len}, all_old_tokens: {all_old_tokens}")
 
     def random_set():
         return random.randint(0,self.vocab_size - 1)
@@ -900,6 +910,7 @@ def jacobi_greedy_search_multilevel(
     set_token = copy_from
 
     past_tokens = [[set_token() for _ in range(WINDOW_SIZE + LEVEL - 3)]] + [None for _ in range(LEVEL - 2)]
+    print(f"[jacobi_greedy_search_multilevel] past_tokens: {len(past_tokens)}-{past_tokens}")
     #past_tokens is the lookahead window. Current we initialize it with random copy from prompts
 
     if DIST_WORKERS > 1:
@@ -911,9 +922,11 @@ def jacobi_greedy_search_multilevel(
     token_map = {}
     steps = 0
     guess_skip_dist = 0
+    total_hits_tokens = 0
 
     if POOL_FROM_PROMPT:
         fill_pool_with_prompt(all_old_tokens, token_map, LEVEL, GUESS_SET_SIZE)
+        print(f"[jacobi_greedy_search_multilevel][fill_pool_with_prompt] all_old_tokens: {len(all_old_tokens)}, token_map: {len(token_map)}")
         
     if chat:
         init = self.tokenizer.decode(all_old_tokens, skip_special_tokens=True, \
@@ -937,9 +950,12 @@ def jacobi_greedy_search_multilevel(
         model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
         if past_key_values is None:
             model_inputs["input_ids"] = input_ids
+            print(f"\n\n [jacobi_greedy_search_multilevel] ***** prefill stage, steps: {steps} start ***** \n")
         else:
             model_inputs["input_ids"] = model_inputs["input_ids"][:, -1 - guess_skip_dist:]
             model_inputs["position_ids"] = model_inputs["position_ids"][:, -1 - guess_skip_dist:]
+            print(f"\n\n [jacobi_greedy_search_multilevel] ***** decode stage, steps: {steps} start ***** \n")
+        print(f"[jacobi_greedy_search_multilevel][after prepare_inputs_for_generation] steps[{steps}] guess_skip_dist: {guess_skip_dist}, input_ids: {model_inputs['input_ids'].shape}, position_ids: {model_inputs['position_ids'].shape}")
         model_inputs["past_key_values"] = past_key_values
 
         ori_guess = None
@@ -961,6 +977,7 @@ def jacobi_greedy_search_multilevel(
                 guess_tokens = guess_tokens[GUESS_SIZE * guess_base: GUESS_SIZE * guess_end]
                 if len(guess_tokens) == 0:
                     guess_tokens = None
+            print(f"[jacobi_greedy_search_multilevel][warmup multi-level window] find guess for lst_token: {lst_token} from token_map {len(token_map)}, guess_tokens_: {guess_tokens_}, guess_tokens: {guess_tokens}")
         else:
             guess_tokens = None
 
@@ -984,7 +1001,8 @@ def jacobi_greedy_search_multilevel(
                 past_tokens_inp.append(tokens[window_start: window_end] if tokens is not None else None)
         else:
             past_tokens_inp = past_tokens
-            
+
+        print(f"[jacobi_greedy_search_multilevel][before jforward_multilevel] input_ids: {model_inputs['input_ids'].shape}, position_ids: {model_inputs['position_ids'].shape}, attention_mask: {model_inputs['attention_mask'].shape}, past_tokens: {past_tokens}, guess_tokens: {guess_tokens}")
         outputs = self.jforward_multilevel(
             **model_inputs,
             past_tokens=past_tokens_inp,
@@ -1032,6 +1050,7 @@ def jacobi_greedy_search_multilevel(
         first_guess = next_tokens.item()
         max_hit = 0 
         hits = [first_guess] + [0] * (GUESS_SIZE - 1)
+        print(f"[jacobi_greedy_search_multilevel][after jforward_multilevel] next_token_logits: {next_token_logits.shape}, next_tokens_scores: {next_tokens_scores.shape}, next_tokens: {next_tokens}, first_guess: {first_guess}, init hits: {hits}")
 
         new_results = []
 
@@ -1039,7 +1058,8 @@ def jacobi_greedy_search_multilevel(
             assert fill_level == 0
             past_tokens[0] = past_tokens[0][1:] 
             past_tokens[1] = torch.argmax(outputs.inp_logits, dim=-1)[0].tolist()
-            
+            print(f"[jacobi_greedy_search_multilevel][filling multi-level window][fill_level={fill_level}] past_tokens: {past_tokens}")
+
             if DIST_WORKERS > 1:
                 nn_past_tokens = [copy.deepcopy(past_tokens[1])]
                 torch.distributed.broadcast_object_list(nn_past_tokens, src=DIST_WORKERS - 1)
@@ -1051,7 +1071,7 @@ def jacobi_greedy_search_multilevel(
                 past_tokens[level] = past_tokens[level][1:] 
             current_past_tokens = torch.argmax(outputs.inp_logits, dim=-1)[0].tolist()
             
-            
+
             if DIST_WORKERS > 1:
                 nn_past_tokens = [None] * DIST_WORKERS
                 torch.distributed.all_gather_object(nn_past_tokens, current_past_tokens)
@@ -1061,7 +1081,7 @@ def jacobi_greedy_search_multilevel(
             #time.sleep(10000)
             past_tokens[fill_level + 1] = current_past_tokens[1:]
             #print("new past: ", (LOCAL_RANK, past_tokens))
-
+            print(f"[jacobi_greedy_search_multilevel][filling multi-level window][fill_level={fill_level}] current_past_tokens: {current_past_tokens}, past_tokens: {past_tokens}")
 
             fill_level += 1
         else: 
@@ -1082,6 +1102,7 @@ def jacobi_greedy_search_multilevel(
                         max_hit = gg 
                         max_hit_idx = eg 
                         hits[:max_hit + 1] = correct[:max_hit + 1]
+                print(f"[jacobi_greedy_search_multilevel][filling multi-level window][fill_level={fill_level}] guess_tokens: {guess_tokens}, guess_results: {guess_results}, max_hit: {max_hit}, hits: {hits}")
             #max_hit is the length of longest accepted sequence in verification branch 
 
             #sync max_hit if we have multi-GPUs
@@ -1112,9 +1133,9 @@ def jacobi_greedy_search_multilevel(
             #time.sleep(1000)
 
             assert len(past_tokens[LEVEL - 2]) == WINDOW_SIZE and len(new_results) == WINDOW_SIZE
-
+            print(f"[jacobi_greedy_search_multilevel][filling multi-level window][fill_level={fill_level}][update_token_map][input] lst_token: {lst_token}, past_tokens: {past_tokens}, inp_logits: {outputs.inp_logits.shape}, new_results: {new_results}, token_map: {len(token_map)}")
             update_token_map(token_map, lst_token, past_tokens, new_results, LEVEL, WINDOW_SIZE, GUESS_SET_SIZE)
-
+            print(f"[jacobi_greedy_search_multilevel][filling multi-level window][fill_level={fill_level}][update_token_map][output] token_map: {len(token_map)}")
 
             if ALWAYS_FWD_ONE:
                 past_tokens[0] = past_tokens[1][1:]
@@ -1122,23 +1143,26 @@ def jacobi_greedy_search_multilevel(
                     past_tokens[level] = past_tokens[level + 1][:]
 
                 past_tokens[LEVEL - 2] = new_results             
+                print(f"[jacobi_greedy_search_multilevel][filling multi-level window][fill_level={fill_level}][new_results shift into past_tokens] new_results: {new_results}, past_tokens: {past_tokens}")
             else:
                 past_tokens[0] = past_tokens[1][1 + max_hit:]
                 for level in range(1, LEVEL - 2):
                     past_tokens[level] = past_tokens[level + 1][max_hit:]
 
                 past_tokens[LEVEL - 2] = new_results[max_hit:]
-
-
+                
 
         if max_hit > 0:
             if not ALWAYS_FWD_ONE:
                 for level in range(LEVEL - 1):
                     past_tokens[level] = past_tokens[level] + [set_token() for _ in range(max_hit)]
+                print(f"[jacobi_greedy_search_multilevel][append max_hit to past_tokens][fill_level={fill_level}][max_hit={max_hit}] past_tokens: {past_tokens}")
 
             attention_mask = model_kwargs["attention_mask"]
             model_kwargs["attention_mask"] = torch.cat((attention_mask, torch.ones(1, max_hit, device=attention_mask.device, dtype=attention_mask.dtype)), dim=1)
-        
+            print(f"[jacobi_greedy_search_multilevel][update attn_mask with max_hit][fill_level={fill_level}][max_hit={max_hit}] attn_mask: {model_kwargs['attention_mask'].shape}")
+        total_hits_tokens += max_hit
+
         #not support awq
         assert USE_AWQ == False  
 
@@ -1161,6 +1185,7 @@ def jacobi_greedy_search_multilevel(
                     kv[1][:,:,outputs.kvcache_len:outputs.kvcache_len+max_hit,:] = kv[1][:,:,offset_kv_cache:offset_kv_cache+max_hit,:]
                 past_key_values.append( (kv[0][:,:,:outputs.kvcache_len + max_hit,:], kv[1][:,:,:outputs.kvcache_len + max_hit,:]) )
             outputs.past_key_values = past_key_values
+            print(f"[jacobi_greedy_search_multilevel][update kvcache][fill_level={fill_level}][max_hit={max_hit}] guess_skip_dist: {guess_skip_dist}, offset_kv_cache: {offset_kv_cache}, step_len: {outputs.step_len}, guess_tokens: {guess_tokens}")
 
         lst_token = hits[max_hit]
 
@@ -1194,6 +1219,8 @@ def jacobi_greedy_search_multilevel(
             prev = len(all_str)
         
         input_ids = torch.cat([input_ids, torch.tensor(hits[:max_hit + 1], device=next_tokens.device, dtype=next_tokens.dtype).unsqueeze(0)], dim=-1)
+
+        print(f"\n[jacobi_greedy_search_multilevel] ***** steps[{steps-1}] summary: guess_tokens: {guess_tokens}, past_tokens: {past_tokens}, total_hits_tokens: {total_hits_tokens}, outputs.logits: {outputs.logits.shape} ***** \n\n")
         
         if streamer is not None:
             streamer.put(next_tokens.cpu())

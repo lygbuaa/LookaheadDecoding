@@ -1,3 +1,9 @@
+# setup env
+1. torch-2.1.0 needs numpy-1.26.4
+2. `python minimal.py`, default testing is on CUDA
+3. to use lookahead, use `USE_LADE=1 LOAD_LADE=1 python minimal.py`
+
+
 <div align="center"><h1>&nbsp;Break the Sequential Dependency of LLM Inference Using Lookahead Decoding</h1></div>
 
 <p align="center">
