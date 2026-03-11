@@ -36,34 +36,51 @@ def sample_proxy(self, *args, **kwargs):
 
 
 def update_token_map(token_map, lst_token, past_tokens, new_results, LEVEL, WINDOW_SIZE, GUESS_SET_SIZE):
-    print(f"[append_new_generated_pool][input] lst_token: {lst_token}, token_map: {len(token_map)}, past_tokens: {past_tokens}, new_results: {new_results}")
+    print(f"[update_token_map][input] lst_token: {lst_token}, token_map: {len(token_map)}, past_tokens: {past_tokens}, new_results: {new_results}")
+    token_map_str = ""
+    counter = 0
+    for k, v in token_map.items():
+        token_map_str += f"{counter}-[{k}]: {v}\n"
+        counter += 1
+    print(f"[update_token_map][before update] token_map size: {len(token_map)}, {token_map_str}")
 
+    ### deal with lst_token
     if GUESS_SET_SIZE != -1: #limited guess set size for each key, lru policy  
         if lst_token not in token_map:
             token_map[lst_token] = []
+            print(f"[update_token_map][lst_token] add key for {lst_token}")
         tup = tuple(past_tokens[ll][0] for ll in range(1, LEVEL - 1)) + (new_results[0],)
         if tup in token_map[lst_token]:
             token_map[lst_token].remove(tup)
             token_map[lst_token].append(tup)
+            print(f"[update_token_map][lst_token] refresh {tup} for {lst_token}")
         elif len(token_map[lst_token]) < GUESS_SET_SIZE:
             token_map[lst_token].append(tup) 
+            print(f"[update_token_map][lst_token] append {tup} for {lst_token}")
         else:
             assert len(token_map[lst_token]) == GUESS_SET_SIZE
             token_map[lst_token] = token_map[lst_token][1:] + [tup]
+            print(f"[update_token_map][lst_token] shift {tup} for {lst_token}")
 
+        ### deal with past_tokens[0] 
         for i in range(1, WINDOW_SIZE):
+            past_token_0i = past_tokens[0][i - 1]
             if past_tokens[0][i - 1] not in token_map:
                 token_map[past_tokens[0][i - 1]] = []
+                print(f"[update_token_map][win-{i}] add key for {past_token_0i}")
             tup = tuple(past_tokens[ll][i] for ll in range(1, LEVEL - 1)) + (new_results[i],)
 
             if tup in token_map[past_tokens[0][i - 1]]:
                 token_map[past_tokens[0][i - 1]].remove(tup)
                 token_map[past_tokens[0][i - 1]].append(tup)
+                print(f"[update_token_map][win-{i}] refresh {tup} for {past_token_0i}")
             elif len(token_map[past_tokens[0][i - 1]]) < GUESS_SET_SIZE:
                 token_map[past_tokens[0][i - 1]].append(tup) 
+                print(f"[update_token_map][win-{i}] append {tup} for {past_token_0i}")
             else:
                 assert len(token_map[past_tokens[0][i - 1]]) == GUESS_SET_SIZE
                 token_map[past_tokens[0][i - 1]] = token_map[past_tokens[0][i - 1]][1:] + [tup]
+                print(f"[update_token_map][win-{i}] shift {tup} for {past_token_0i}")
 
     else: #unlimited guess set size for each key 
         #first add 
@@ -79,26 +96,42 @@ def update_token_map(token_map, lst_token, past_tokens, new_results, LEVEL, WIND
                 token_map[past_tokens[0][i - 1]] = set()
             tup = tuple(past_tokens[ll][i] for ll in range(1, LEVEL - 1)) + (new_results[i],)
             token_map[past_tokens[0][i - 1]].add(tup) 
-    print(f"[append_new_generated_pool][output] token_map: {len(token_map)}")
+    print(f"[update_token_map][output] token_map: {len(token_map)}")
+    token_map_str = ""
+    counter = 0
+    for k, v in token_map.items():
+        token_map_str += f"{counter}-[{k}]: {v}\n"
+        counter += 1
+    print(f"[update_token_map][after update] token_map size: {len(token_map)}, {token_map_str}")
 
 def append_new_generated_pool(tokens, token_map, LEVEL, GUESS_SET_SIZE):
     if len(tokens) != LEVEL:
         return 
     lst_token = tokens[0]
     tup = tuple(tokens[1:])
-    print(f"[append_new_generated_pool][input] all_old_tokens: {tokens}, token_map: {len(token_map)}, lst_token: {lst_token}")
+    print(f"[append_new_generated_pool][input] all_old_tokens: {tokens}, token_map: {len(token_map)}, lst_token: {lst_token}, tup: {tup}")
+    token_map_str = ""
+    counter = 0
+    for k, v in token_map.items():
+        token_map_str += f"{counter}-[{k}]: {v}\n"
+        counter += 1
+    print(f"[append_new_generated_pool][before update] token_map size: {len(token_map)}, {token_map_str}")
 
     if GUESS_SET_SIZE != -1: #limited guess set size for each key, lru policy  
         if lst_token not in token_map:
             token_map[lst_token] = []
+            print(f"[append_new_generated_pool][lst_token] add key for {lst_token}")
         if tup in token_map[lst_token]:
             token_map[lst_token].remove(tup)
             token_map[lst_token].append(tup)
+            print(f"[append_new_generated_pool][lst_token] refresh {tup} for {lst_token}")
         elif len(token_map[lst_token]) < GUESS_SET_SIZE:
             token_map[lst_token].append(tup) 
+            print(f"[append_new_generated_pool][lst_token] append {tup} for {lst_token}")
         else:
             assert len(token_map[lst_token]) == GUESS_SET_SIZE
             token_map[lst_token] = token_map[lst_token][1:] + [tup]
+            print(f"[append_new_generated_pool][lst_token] shift {tup} for {lst_token}")
     else: #unlimited guess set size for each key 
         #first add 
         if lst_token not in token_map:
@@ -106,7 +139,12 @@ def append_new_generated_pool(tokens, token_map, LEVEL, GUESS_SET_SIZE):
         token_map[lst_token].add(tup) 
     # append_new_generated_pool(all_old_tokens[-LEVEL:], token_map, LEVEL, GUESS_SET_SIZE)
     print(f"[append_new_generated_pool][output] token_map: {len(token_map)}")
-
+    token_map_str = ""
+    counter = 0
+    for k, v in token_map.items():
+        token_map_str += f"{counter}-[{k}]: {v}\n"
+        counter += 1
+    print(f"[append_new_generated_pool][after update] token_map size: {len(token_map)}, {token_map_str}")
 
 def fill_pool_with_prompt(prompts, token_map, LEVEL, GUESS_SET_SIZE):
     print(f"[fill_pool_with_prompt][input] prompts: {len(prompts)}, token_map: {len(token_map)}")
@@ -952,6 +990,7 @@ def jacobi_greedy_search_multilevel(
             model_inputs["input_ids"] = input_ids
             print(f"\n\n [jacobi_greedy_search_multilevel] ***** prefill stage, steps: {steps} start ***** \n")
         else:
+            ## if DIST_WORKERS <=1, guess_skip_dist always = 0
             model_inputs["input_ids"] = model_inputs["input_ids"][:, -1 - guess_skip_dist:]
             model_inputs["position_ids"] = model_inputs["position_ids"][:, -1 - guess_skip_dist:]
             print(f"\n\n [jacobi_greedy_search_multilevel] ***** decode stage, steps: {steps} start ***** \n")
@@ -1090,18 +1129,22 @@ def jacobi_greedy_search_multilevel(
             #match guess tokens 
             if guess_tokens is not None:
                 guess_results = torch.argmax(outputs.guess_logits, dim=-1)[0].tolist()
+                print(f"[jacobi_greedy_search_multilevel][validate guess] guess_tokens: {guess_tokens}, guess_results: {guess_results}")
                 for eg in range(len(guess_results) // GUESS_SIZE):
                     egx = eg * GUESS_SIZE
                     correct = [first_guess] + guess_results[egx:egx + GUESS_SIZE]
                     myguess = guess_tokens[egx:egx + GUESS_SIZE]
+                    print(f"[jacobi_greedy_search_multilevel] eg: {eg}, egx: {egx}, correct: {correct}, myguess: {myguess}")
                     gg = 0
                     for gg in range(len(myguess)):
                         if myguess[gg] != correct[gg]:
+                            print(f"[jacobi_greedy_search_multilevel][break] gg: {gg}")
                             break 
                     if gg > max_hit:
                         max_hit = gg 
                         max_hit_idx = eg 
                         hits[:max_hit + 1] = correct[:max_hit + 1]
+                        print(f"[jacobi_greedy_search_multilevel][find max_hit] gg: {gg}, max_hit: {max_hit}, max_hit_idx: {max_hit_idx}, hits: {hits}")
                 print(f"[jacobi_greedy_search_multilevel][filling multi-level window][fill_level={fill_level}] guess_tokens: {guess_tokens}, guess_results: {guess_results}, max_hit: {max_hit}, hits: {hits}")
             #max_hit is the length of longest accepted sequence in verification branch 
 
@@ -1178,14 +1221,17 @@ def jacobi_greedy_search_multilevel(
         else:
             guess_skip_dist = 0
             offset_kv_cache = outputs.step_len-len(guess_tokens)+max_hit_idx * GUESS_SIZE if max_hit > 0 else 0
+            print(f"[jacobi_greedy_search_multilevel][update kvcache][fill_level={fill_level}][max_hit={max_hit}] guess_skip_dist: {guess_skip_dist}, offset_kv_cache: {offset_kv_cache}, step_len: {outputs.step_len}, kvcache_len: {outputs.kvcache_len}, guess_tokens: {guess_tokens}")
+
             for idx, kv in enumerate(outputs.past_key_values):
                 #update kv-cache from verification branch  
                 if max_hit > 0:
                     kv[0][:,:,outputs.kvcache_len:outputs.kvcache_len+max_hit,:] = kv[0][:,:,offset_kv_cache:offset_kv_cache+max_hit,:]
                     kv[1][:,:,outputs.kvcache_len:outputs.kvcache_len+max_hit,:] = kv[1][:,:,offset_kv_cache:offset_kv_cache+max_hit,:]
+                    print(f"[jacobi_greedy_search_multilevel][update kvcache][{idx}] shift [{offset_kv_cache}:{offset_kv_cache+max_hit}] to [{outputs.kvcache_len}:{outputs.kvcache_len+max_hit}]]")
                 past_key_values.append( (kv[0][:,:,:outputs.kvcache_len + max_hit,:], kv[1][:,:,:outputs.kvcache_len + max_hit,:]) )
+                print(f"[jacobi_greedy_search_multilevel][update kvcache][{idx}] only keep [{0}:{outputs.kvcache_len + max_hit}]")
             outputs.past_key_values = past_key_values
-            print(f"[jacobi_greedy_search_multilevel][update kvcache][fill_level={fill_level}][max_hit={max_hit}] guess_skip_dist: {guess_skip_dist}, offset_kv_cache: {offset_kv_cache}, step_len: {outputs.step_len}, guess_tokens: {guess_tokens}")
 
         lst_token = hits[max_hit]
 
@@ -1197,7 +1243,9 @@ def jacobi_greedy_search_multilevel(
                 max_hit = hit_idx
                 break
             else:
-                all_old_tokens.append(hits[max_hit])
+                ## it should be hits[hit_idx], not hits[max_hit]
+                all_old_tokens.append(hits[hit_idx])
+                print(f"[jacobi_greedy_search_multilevel] max_hit: {max_hit}, append hits ({hits[hit_idx]}) to all_old_tokens ({len(all_old_tokens)})")
                 if POOL_FROM_PROMPT:
                     append_new_generated_pool(all_old_tokens[-LEVEL:], token_map, LEVEL, GUESS_SET_SIZE)
 

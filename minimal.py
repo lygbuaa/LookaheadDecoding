@@ -14,7 +14,7 @@ if int(os.environ.get("LOAD_LADE", 0)):
     ## for TinyLlama-1.1B-Chat-v1.0 @cuda
     # lade.config_lade(LEVEL=7, WINDOW_SIZE=20, GUESS_SET_SIZE=20, DEBUG=1, POOL_FROM_PROMPT=True)
     ## for TinyLlama-1.1B-Chat-v1.0 @cpu
-    lade.config_lade(LEVEL=3, WINDOW_SIZE=4, GUESS_SET_SIZE=5, DEBUG=1, POOL_FROM_PROMPT=True)
+    lade.config_lade(LEVEL=4, WINDOW_SIZE=4, GUESS_SET_SIZE=5, DEBUG=1, POOL_FROM_PROMPT=True)
     # lade.config_lade(LEVEL=3, WINDOW_SIZE=5, GUESS_SET_SIZE=5, DEBUG=1, POOL_FROM_PROMPT=True)
     # lade.config_lade(LEVEL=5, WINDOW_SIZE=10, GUESS_SET_SIZE=10, DEBUG=1, POOL_FROM_PROMPT=True)
     # lade.config_lade(LEVEL=7, WINDOW_SIZE=20, GUESS_SET_SIZE=20, DEBUG=1, POOL_FROM_PROMPT=True)
@@ -62,7 +62,7 @@ model_inputs = tokenizer(input_text, return_tensors='pt').to(torch_device)
 
 # torch.cuda.synchronize()
 t0g = time.time()
-greedy_output = model.generate(**model_inputs, max_new_tokens=32, do_sample=False)
+greedy_output = model.generate(**model_inputs, max_new_tokens=64, do_sample=False)
 # torch.cuda.synchronize()
 t1g = time.time()
 print("Greedy output: ", tokenizer.decode(greedy_output[0], skip_special_tokens=False))
